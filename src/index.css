@@ -577,14 +577,157 @@ button {
   gap: 14px;
 }
 
+.jobs-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.jobs-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.jobs-hero-copy,
+.jobs-hero-panel {
+  position: relative;
+  overflow: hidden;
+  padding: 28px;
+  border-radius: 28px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.jobs-hero-copy {
+  background:
+    radial-gradient(circle at top right, rgba(31, 79, 209, 0.14), transparent 30%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(247, 250, 255, 0.86));
+}
+
+.jobs-hero-copy h1 {
+  margin: 10px 0 0;
+  font-size: clamp(40px, 5vw, 58px);
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+  font-weight: 650;
+}
+
+.jobs-hero-text {
+  margin: 18px 0 0;
+  max-width: 720px;
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.jobs-highlight-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.jobs-highlight-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 16px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.jobs-highlight-card svg {
+  color: var(--brand);
+  margin-top: 3px;
+}
+
+.jobs-highlight-card strong,
+.jobs-highlight-card span {
+  display: block;
+}
+
+.jobs-highlight-card strong {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.jobs-highlight-card span {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
+.jobs-hero-panel {
+  background:
+    linear-gradient(180deg, rgba(13, 26, 58, 0.98), rgba(18, 42, 88, 0.98)),
+    radial-gradient(circle at top left, rgba(96, 165, 250, 0.28), transparent 34%);
+  color: rgba(255, 255, 255, 0.92);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.jobs-panel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  padding: 9px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.jobs-panel-metrics {
+  display: grid;
+  gap: 18px;
+  margin-top: 26px;
+}
+
+.jobs-metric-value,
+.jobs-metric-label {
+  display: block;
+}
+
+.jobs-metric-value {
+  font-size: clamp(34px, 5vw, 46px);
+  font-weight: 650;
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+}
+
+.jobs-metric-label {
+  margin-top: 6px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.jobs-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+}
+
 .job-card,
 .application-card {
   display: grid;
   gap: 16px;
-  padding: 20px;
-  border-radius: 20px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.7);
+  padding: 22px;
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 255, 0.88));
+  box-shadow: 0 24px 50px rgba(15, 23, 42, 0.07);
 }
 
 .job-card h3,
@@ -594,10 +737,39 @@ button {
   font-weight: 600;
 }
 
+.job-card-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+}
+
+.job-card-copy p {
+  max-width: 62ch;
+  line-height: 1.7;
+}
+
+.job-card-department {
+  background: rgba(31, 79, 209, 0.08);
+  color: var(--brand-deep);
+}
+
 .job-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.job-card-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: end;
+}
+
+.job-card-footnote {
+  display: grid;
+  gap: 6px;
 }
 
 .skill-row {
@@ -661,6 +833,7 @@ button {
 @media (max-width: 1120px) {
   .app-shell,
   .auth-shell,
+  .jobs-hero,
   .split-hero,
   .grid-3,
   .grid-2,
@@ -686,6 +859,13 @@ button {
   .topbar {
     padding-left: 20px;
     padding-right: 20px;
+  }
+
+  .jobs-grid,
+  .jobs-highlight-row,
+  .job-card-top,
+  .job-card-footer {
+    grid-template-columns: 1fr;
   }
 }
 
