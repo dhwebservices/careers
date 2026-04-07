@@ -90,7 +90,12 @@ export default function NewApplicationPage() {
       })
       navigate('/applications', { replace: true })
     } catch (submitError) {
-      setError(submitError.message || 'Could not submit your application.')
+      const message = submitError?.message || 'Could not submit your application.'
+      if (/column|portal_status|candidate_user_id|candidate_profile_snapshot/i.test(message)) {
+        setError(`Application save failed because the Supabase candidate portal migration is not fully applied yet. Technical detail: ${message}`)
+      } else {
+        setError(message)
+      }
     } finally {
       setSubmitting(false)
     }

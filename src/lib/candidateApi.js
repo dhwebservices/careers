@@ -1,4 +1,5 @@
 import { env } from './env'
+import { sendCandidateApplicationConfirmation, sendRecruitingNewApplicationNotification } from './email'
 import { supabase } from './supabase'
 
 const EMPTY_PROFILE = {
@@ -341,6 +342,8 @@ export async function submitCandidateApplication({ userId, job, profile, payload
     commission_acknowledged: payload.commission_acknowledged === true,
     privacy_acknowledged: payload.privacy_acknowledged === true,
     source: 'candidate_portal',
+    portal_status: 'active',
+    portal_last_viewed_at: new Date().toISOString(),
     candidate_profile_snapshot: snapshot,
     submitted_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -353,5 +356,33 @@ export async function submitCandidateApplication({ userId, job, profile, payload
     .single()
 
   if (error) throw error
+
+  const candidateName = record.full_name || record.email
+  const roleTitle = data?.job_posts?.title || job.title || 'Application'
+  const applicationRef = data?.application_ref || record.application_ref
+
+  const emailResults = await Promise.allSettled([
+    sendCandidateApplicationConfirmation({
+      candidateEmail: record.email,
+      candidateName,
+      roleTitle,
+      applicationRef,
+    }),
+    sendRecruitingNewApplicationNotification({
+      roleTitle,
+      applicationRef,
+      candidateName,
+      candidateEmail: record.email,
+      candidatePhone: record.phone,
+      location: record.location,
+      currentRole: record.current_job_title,
+    }),
+  ])
+
+  const failedEmail = emailResults.find((result) => result.status === 'rejected')
+  if (failedEmail) {
+    console.warn('Application emails failed after application insert:', failedEmail.reason)
+  }
+
   return data
 }
