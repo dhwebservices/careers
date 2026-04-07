@@ -51,7 +51,7 @@ export default function JobDetailPage() {
             <span className="pill"><Wallet size={14} /> {job.salary_text || (job.commission_only ? 'Commission only' : 'Discussed at interview')}</span>
           </div>
 
-          <Link className="button" to={user ? `/apply/${job.slug}` : '/login'} style={{ width: '100%', marginTop: 22 }}>
+          <Link className="button" to={user ? `/apply/${job.slug}` : `/login?redirectTo=${encodeURIComponent(`/apply/${job.slug}`)}`} style={{ width: '100%', marginTop: 22 }}>
             {user ? 'Start application' : 'Sign in to apply'}
           </Link>
           {!user ? <p className="tiny muted" style={{ marginBottom: 0 }}>Candidates need an account to apply and manage updates.</p> : null}

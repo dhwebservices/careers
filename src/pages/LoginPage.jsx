@@ -12,7 +12,8 @@ export default function LoginPage() {
   const [form, setForm] = useState({ email: '', password: '', confirmPassword: '' })
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState('')
-  const redirectTo = location.state?.redirectTo || '/'
+  const redirectParam = new URLSearchParams(location.search).get('redirectTo')
+  const redirectTo = redirectParam || location.state?.redirectTo || '/'
 
   useEffect(() => {
     if (user) navigate(redirectTo, { replace: true })
@@ -34,7 +35,7 @@ export default function LoginPage() {
           throw new Error('Passwords do not match.')
         }
 
-        await signUpCandidate({ email: form.email, password: form.password })
+        await signUpCandidate({ email: form.email, password: form.password, redirectTo })
         await claimExistingApplications().catch(() => {})
         setMessage('Account created. Check your email if confirmation is enabled, then sign in.')
         setMode('signin')

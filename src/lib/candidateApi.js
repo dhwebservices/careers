@@ -64,13 +64,16 @@ export async function signInCandidate({ email, password }) {
   if (error) throw error
 }
 
-export async function signUpCandidate({ email, password }) {
+export async function signUpCandidate({ email, password, redirectTo = '/' }) {
   if (!supabase) throw new Error('Supabase is not configured yet.')
+  const safeRedirect = String(redirectTo || '/')
+  const redirectUrl = new URL(`${env.portalBaseUrl}/login`)
+  redirectUrl.searchParams.set('redirectTo', safeRedirect)
   const { error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      emailRedirectTo: `${env.portalBaseUrl}/`,
+      emailRedirectTo: redirectUrl.toString(),
     },
   })
   if (error) throw error

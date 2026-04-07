@@ -21,7 +21,8 @@ function RequireAuth({ children }) {
   }
 
   if (!user) {
-    return <Navigate to="/login" replace state={{ redirectTo: location.pathname + location.search }} />
+    const redirectTo = `${location.pathname}${location.search}`
+    return <Navigate to={`/login?redirectTo=${encodeURIComponent(redirectTo)}`} replace state={{ redirectTo }} />
   }
 
   return children
