@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, createContext, useContext } from 'react'
+import React, { useEffect, useMemo, useRef, useState, createContext, useContext } from 'react'
 import {
   AlertCircle,
   ArrowLeft,
@@ -26,6 +26,50 @@ import {
   User,
   Users,
 } from 'lucide-react'
+import {
+  bookInterviewSlot,
+  claimExistingApplications,
+  ensureCandidateProfile,
+  fetchCandidateProfile,
+  listCandidateApplications,
+  listCandidateExperience,
+  listCandidateInterviews,
+  listCandidateMessages,
+  listCandidateSkills,
+  listPublishedJobs,
+  resetCandidatePassword,
+  saveCandidateExperience,
+  saveCandidateProfile,
+  saveCandidateSkills,
+  signInCandidate,
+  signOutCandidate,
+  signUpCandidate,
+  submitCandidateApplication,
+  syncCandidateProfileSnapshot,
+  uploadCandidateCv,
+} from './lib/candidateApi'
+import { isSupabaseConfigured } from './lib/env'
+import { supabase } from './lib/supabase'
+
+const EMPTY_PROFILE = {
+  user_id: '',
+  email: '',
+  first_name: '',
+  last_name: '',
+  phone: '',
+  date_of_birth: '',
+  ni_number: '',
+  location: '',
+  address_line_1: '',
+  address_line_2: '',
+  city: '',
+  postcode: '',
+  country: 'United Kingdom',
+  linkedin_url: '',
+  portfolio_url: '',
+  summary: '',
+  right_to_work_uk: '',
+}
 
 const jobsSeed = [
   {
@@ -331,7 +375,7 @@ function PublicFooter() {
   )
 }
 
-function JobCard({ job, ctaTo, ctaLabel = 'View role' }) {
+function JobCard({ job, ctaTo, ctaParams, ctaLabel = 'View role' }) {
   const { navigate } = useRouter()
 
   return (
@@ -355,7 +399,7 @@ function JobCard({ job, ctaTo, ctaLabel = 'View role' }) {
           <span>Applications managed through the DH candidate portal</span>
           <span>Reviewed inside the DH staff portal</span>
         </div>
-        <Button variant="secondary" onClick={() => navigate(ctaTo)}>
+        <Button variant="secondary" onClick={() => navigate(ctaTo, ctaParams)}>
           {ctaLabel}
           <ArrowRight size={16} />
         </Button>
@@ -433,7 +477,13 @@ function HomePage() {
 
         <div className="mx-auto mt-8 grid w-[min(1180px,calc(100%-40px))] gap-5 lg:grid-cols-3">
           {featured.map((job) => (
-            <JobCard key={job.id} job={job} ctaTo={user ? '/portal/dashboard' : '/jobs/detail'} ctaLabel={user ? 'Apply now' : 'View role'} />
+            <JobCard
+              key={job.id}
+              job={job}
+              ctaTo={user ? '/portal/apply' : '/jobs/detail'}
+              ctaParams={{ id: job.id, jobId: job.id }}
+              ctaLabel={user ? 'Apply now' : 'View role'}
+            />
           ))}
         </div>
       </section>
@@ -647,7 +697,13 @@ function JobsPage() {
 
         <div className="mx-auto mt-8 grid w-[min(1180px,calc(100%-40px))] gap-5 lg:grid-cols-2">
           {filteredJobs.map((job) => (
-            <JobCard key={job.id} job={job} ctaTo={user ? '/portal/apply' : '/jobs/detail'} ctaLabel={user ? 'Apply now' : 'View role'} />
+            <JobCard
+              key={job.id}
+              job={job}
+              ctaTo={user ? '/portal/apply' : '/jobs/detail'}
+              ctaParams={{ id: job.id, jobId: job.id }}
+              ctaLabel={user ? 'Apply now' : 'View role'}
+            />
           ))}
         </div>
       </section>
@@ -662,6 +718,22 @@ function JobDetailPage() {
   const { user } = useAuth()
   const { jobs } = useData()
   const job = jobs.find((item) => item.id === route.params?.id) || jobs[0]
+
+  if (!job) {
+    return (
+      <div className="min-h-screen">
+        <PublicHeader />
+        <section className="py-20">
+          <div className="mx-auto w-[min(860px,calc(100%-40px))] rounded-[28px] border border-slate-200 bg-white/88 p-8 shadow-[0_10px_28px_rgba(15,23,42,0.05)]">
+            <h1 className="text-[2rem] font-semibold text-slate-950">Role not found</h1>
+            <p className="mt-3 text-base leading-8 text-slate-600">That role is no longer available or could not be loaded from the recruitment workspace.</p>
+            <Button className="mt-6" onClick={() => navigate('/jobs')}>Back to roles</Button>
+          </div>
+        </section>
+        <PublicFooter />
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen">
@@ -714,42 +786,86 @@ function JobDetailPage() {
 
 function AuthPage({ mode }) {
   const { route, navigate } = useRouter()
-  const { login } = useAuth()
+  const { login, signup, resetPassword } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
-  const currentMode = mode || 'login'
+  const currentMode = route.params?.mode === 'reset' ? 'reset' : (mode || 'login')
+
+  useEffect(() => {
+    if (route.params?.email) {
+      setEmail(route.params.email)
+    }
+  }, [route.params?.email])
+
+  useEffect(() => {
+    if (route.params?.notice === 'account-created') {
+      setMessage('Account created. Check your email if confirmation is enabled, then sign in.')
+      return
+    }
+    if (route.params?.notice === 'portal-invite') {
+      setMessage('Sign in with the same email address used on your application to connect your existing recruitment record.')
+      return
+    }
+  }, [route.params?.notice])
 
   async function handleSubmit(event) {
     event.preventDefault()
     setLoading(true)
     setMessage('')
 
-    if (currentMode === 'forgot') {
-      setTimeout(() => {
+    try {
+      if (currentMode === 'forgot') {
+        await resetPassword(email)
         setLoading(false)
         setMessage(`Password reset sent to ${email}.`)
-      }, 600)
-      return
-    }
+        return
+      }
 
-    if (currentMode === 'signup' && password !== confirmPassword) {
-      setMessage('Passwords do not match.')
-      setLoading(false)
-      return
-    }
+      if (currentMode === 'reset') {
+        if (password !== confirmPassword) {
+          throw new Error('Passwords do not match.')
+        }
+        if (!supabase) {
+          throw new Error('Supabase is not configured yet.')
+        }
+        const { error } = await supabase.auth.updateUser({ password })
+        if (error) throw error
+        setMessage('Password updated. You can now sign in with the new password.')
+        navigate('/login', { email })
+        return
+      }
 
-    setTimeout(() => {
-      login(email || initialUser.email)
-      setLoading(false)
-      if (route.params?.jobId) {
+      if (currentMode === 'signup' && password !== confirmPassword) {
+        throw new Error('Passwords do not match.')
+      }
+
+      if (currentMode === 'signup') {
+        const redirectTarget = route.params?.applicationId
+          ? `/portal/application?${new URLSearchParams({ id: route.params.applicationId }).toString()}`
+          : route.params?.jobId
+            ? `/portal/apply?${new URLSearchParams({ jobId: route.params.jobId }).toString()}`
+            : '/portal/dashboard'
+        await signup(email, password, redirectTarget)
+        navigate('/login', { ...route.params, notice: 'account-created' })
+        return
+      }
+
+      await login(email, password)
+      if (route.params?.applicationId) {
+        navigate('/portal/application', { id: route.params.applicationId })
+      } else if (route.params?.jobId) {
         navigate('/portal/apply', { jobId: route.params.jobId })
       } else {
         navigate('/portal/dashboard')
       }
-    }, 600)
+    } catch (error) {
+      setMessage(error?.message || 'We could not complete that action.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -788,20 +904,24 @@ function AuthPage({ mode }) {
               <button type="button" className={`min-h-10 rounded-full px-4 text-sm font-semibold ${currentMode === 'signup' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500'}`} onClick={() => navigate('/signup', route.params)}>
                 Create account
               </button>
-              <button type="button" className={`min-h-10 rounded-full px-4 text-sm font-semibold ${currentMode === 'forgot' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500'}`} onClick={() => navigate('/forgot', route.params)}>
-                Reset password
-              </button>
+              {currentMode !== 'reset' ? (
+                <button type="button" className={`min-h-10 rounded-full px-4 text-sm font-semibold ${currentMode === 'forgot' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500'}`} onClick={() => navigate('/forgot', route.params)}>
+                  Reset password
+                </button>
+              ) : null}
             </div>
 
             <h2 className="mt-6 text-[2rem] font-semibold leading-tight text-slate-950">
-              {currentMode === 'signup' ? 'Create your candidate account' : currentMode === 'forgot' ? 'Reset your password' : 'Sign in to manage your applications'}
+              {currentMode === 'signup' ? 'Create your candidate account' : currentMode === 'forgot' ? 'Reset your password' : currentMode === 'reset' ? 'Choose a new password' : 'Sign in to manage your applications'}
             </h2>
             <p className="mt-3 text-base leading-8 text-slate-600">
-              Existing applicants should use the same email address they already applied with so we can attach their live recruitment record to this portal account.
+              {currentMode === 'reset'
+                ? 'Enter and confirm a new password for your candidate account.'
+                : 'Existing applicants should use the same email address they already applied with so we can attach their live recruitment record to this portal account.'}
             </p>
 
             {message ? (
-              <div className={`mt-5 rounded-[20px] border p-4 ${message.toLowerCase().includes('sent') ? 'border-emerald-200 bg-emerald-50/80 text-emerald-700' : 'border-red-200 bg-red-50/80 text-red-700'}`}>
+              <div className={`mt-5 rounded-[20px] border p-4 ${/(created|sent|updated|sign in with the same email)/i.test(message) ? 'border-emerald-200 bg-emerald-50/80 text-emerald-700' : 'border-red-200 bg-red-50/80 text-red-700'}`}>
                 {message}
               </div>
             ) : null}
@@ -823,7 +943,7 @@ function AuthPage({ mode }) {
                   <div className="flex items-center justify-between gap-3">
                     <label className="text-sm font-semibold text-slate-900">Password</label>
                     {currentMode === 'login' ? (
-                      <button type="button" className="text-xs font-semibold text-slate-500" onClick={() => navigate('/forgot')}>
+                      <button type="button" className="text-xs font-semibold text-slate-500" onClick={() => navigate('/forgot', route.params)}>
                         Forgot password?
                       </button>
                     ) : null}
@@ -838,7 +958,7 @@ function AuthPage({ mode }) {
                 </div>
               ) : null}
 
-              {currentMode === 'signup' ? (
+              {currentMode === 'signup' || currentMode === 'reset' ? (
                 <div className="grid gap-2">
                   <label className="text-sm font-semibold text-slate-900">Confirm password</label>
                   <input
@@ -852,7 +972,7 @@ function AuthPage({ mode }) {
               ) : null}
 
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? 'Working...' : currentMode === 'signup' ? 'Create candidate account' : currentMode === 'forgot' ? 'Send reset link' : 'Sign in'}
+                {loading ? 'Working...' : currentMode === 'signup' ? 'Create candidate account' : currentMode === 'forgot' ? 'Send reset link' : currentMode === 'reset' ? 'Update password' : 'Sign in'}
               </Button>
             </form>
 
@@ -873,8 +993,16 @@ function AuthPage({ mode }) {
 }
 
 function PortalLayout({ children }) {
-  const { user, logout } = useAuth()
+  const { user, profile, logout } = useAuth()
   const { route, navigate } = useRouter()
+  const displayName = `${profile?.first_name || user?.user_metadata?.first_name || ''} ${profile?.last_name || user?.user_metadata?.last_name || ''}`.trim() || user?.email || 'Candidate'
+  const initials = displayName
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
   const navItems = [
     { label: 'Overview', path: '/portal/dashboard', icon: LayoutDashboard },
     { label: 'Applications', path: '/portal/applications', icon: FileCheck },
@@ -934,11 +1062,11 @@ function PortalLayout({ children }) {
             </button>
             <div className="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white/92 px-2 py-1">
               <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-slate-900 to-blue-600 text-sm font-semibold text-white">
-                {user.firstName[0]}{user.lastName[0]}
+                {initials}
               </div>
               <div className="pr-2">
-                <strong className="block text-sm text-slate-950">{user.firstName} {user.lastName}</strong>
-                <span className="block text-xs text-slate-500">{user.email}</span>
+                <strong className="block text-sm text-slate-950">{displayName}</strong>
+                <span className="block text-xs text-slate-500">{user?.email}</span>
               </div>
             </div>
           </div>
@@ -951,15 +1079,32 @@ function PortalLayout({ children }) {
 }
 
 function PortalDashboard() {
+  const { user, profile } = useAuth()
   const { navigate } = useRouter()
   const { applications, interviews, jobs } = useData()
   const actionRequiredInterviews = interviews.filter((interview) => interview.status === 'INVITED')
+  const profileReadiness = Math.min(
+    100,
+    Math.round(
+      (
+        [
+          profile?.first_name,
+          profile?.last_name,
+          profile?.phone,
+          profile?.location,
+          profile?.linkedin_url || profile?.portfolio_url,
+          profile?.summary,
+        ].filter(Boolean).length /
+          6
+      ) * 100,
+    ),
+  )
 
   return (
     <div className="grid gap-6">
       <section className="grid gap-5 lg:grid-cols-[1.35fr_0.78fr]">
         <div className="rounded-[28px] border border-slate-200 bg-white/88 p-7 shadow-[0_10px_28px_rgba(15,23,42,0.05)]">
-          <h2 className="text-[2rem] font-semibold leading-tight text-slate-950">Welcome back, Jane.</h2>
+          <h2 className="text-[2rem] font-semibold leading-tight text-slate-950">Welcome back, {user?.user_metadata?.first_name || profile?.first_name || user?.email?.split('@')[0] || 'there'}.</h2>
           <p className="mt-3 max-w-3xl text-base leading-8 text-slate-600">
             Your candidate account is the home for profile updates, future applications, recruiter-driven status changes, and interview scheduling.
           </p>
@@ -971,7 +1116,7 @@ function PortalDashboard() {
 
         <div className="rounded-[28px] border border-slate-200 bg-white/88 p-7 shadow-[0_10px_28px_rgba(15,23,42,0.05)]">
           <p className="text-xs font-semibold text-slate-500">Profile readiness</p>
-          <span className="mt-3 block text-4xl font-semibold text-slate-950">78%</span>
+          <span className="mt-3 block text-4xl font-semibold text-slate-950">{profileReadiness}%</span>
           <p className="mt-3 text-sm leading-7 text-slate-600">
             The more complete your profile is, the faster you can apply and the clearer your recruiter view becomes.
           </p>
@@ -1052,7 +1197,7 @@ function PortalDashboard() {
 
           <div className="grid gap-4">
             {jobs.slice(0, 2).map((job) => (
-              <JobCard key={job.id} job={job} ctaTo="/portal/apply" ctaLabel="Apply now" />
+              <JobCard key={job.id} job={job} ctaTo="/portal/apply" ctaParams={{ jobId: job.id }} ctaLabel="Apply now" />
             ))}
           </div>
         </div>
@@ -1085,7 +1230,7 @@ function PortalApplications() {
         <p className="text-xs font-semibold text-slate-500">Application history</p>
         <h2 className="mt-3 text-[2rem] font-semibold text-slate-950">Everything tied to your account</h2>
         <p className="mt-3 max-w-4xl text-base leading-8 text-slate-600">
-          Existing applications submitted with the same email address can be linked automatically once the invite and claim flow is active in production.
+          Applications already submitted with this email address are linked to your candidate account so the hiring updates you see here match the same records used in the staff portal.
         </p>
       </section>
 
@@ -1138,6 +1283,27 @@ function PortalApplicationDetail() {
   const { route, goBack, navigate } = useRouter()
   const { applications, jobs, messages, interviews } = useData()
   const application = applications.find((item) => item.id === route.params?.id) || applications[0]
+  if (!application) {
+    return (
+      <div className="grid gap-6">
+        <button type="button" onClick={goBack} className="inline-flex items-center gap-2 text-sm font-semibold text-slate-500">
+          <ArrowLeft size={16} />
+          Back
+        </button>
+
+        <section className="rounded-[28px] border border-slate-200 bg-white/88 p-6 shadow-[0_10px_28px_rgba(15,23,42,0.05)]">
+          <h2 className="text-[2rem] font-semibold text-slate-950">Application not available yet</h2>
+          <p className="mt-3 max-w-4xl text-base leading-8 text-slate-600">
+            Your account is signed in, but that linked application has not loaded into the candidate workspace yet. This usually resolves once the recruitment records finish syncing to your account.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Button onClick={() => navigate('/portal/dashboard')}>Go to dashboard</Button>
+            <Button variant="secondary" onClick={() => navigate('/portal/applications')}>View all applications</Button>
+          </div>
+        </section>
+      </div>
+    )
+  }
   const job = jobs.find((item) => item.id === application.jobId)
   const applicationMessages = messages.filter((item) => item.applicationId === application.id)
   const interview = interviews.find((item) => item.applicationId === application.id)
@@ -1241,11 +1407,35 @@ function PortalInterviews() {
   const { interviews, applications, jobs, bookInterview } = useData()
   const [loadingMap, setLoadingMap] = useState({})
 
-  async function handleBook(interviewId, slot) {
-    setLoadingMap((current) => ({ ...current, [interviewId]: true }))
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    bookInterview(interviewId, slot)
-    setLoadingMap((current) => ({ ...current, [interviewId]: false }))
+  function buildInterviewCalendarUrl(interview, jobTitle) {
+    const start = new Date(interview.selectedSlot)
+    if (Number.isNaN(start.getTime())) return '#'
+    const end = new Date(start.getTime() + Number(interview.durationMinutes || 60) * 60000)
+    const toUtcStamp = (value) =>
+      value
+        .toISOString()
+        .replace(/[-:]/g, '')
+        .replace(/\.\d{3}Z$/, 'Z')
+
+    const params = new URLSearchParams({
+      action: 'TEMPLATE',
+      text: `${jobTitle || interview.title} interview`,
+      dates: `${toUtcStamp(start)}/${toUtcStamp(end)}`,
+      details: `DH Careers interview${interview.locationDetails ? `\n\nLocation: ${interview.locationDetails}` : ''}`,
+      location: interview.locationDetails || 'DH Website Services',
+    })
+
+    return `https://calendar.google.com/calendar/render?${params.toString()}`
+  }
+
+  async function handleBook(slotId, applicationId) {
+    const key = `${applicationId}:${slotId}`
+    setLoadingMap((current) => ({ ...current, [key]: true }))
+    try {
+      await bookInterview(slotId)
+    } finally {
+      setLoadingMap((current) => ({ ...current, [key]: false }))
+    }
   }
 
   return (
@@ -1279,13 +1469,14 @@ function PortalInterviews() {
                   <h4 className="mb-4 text-base font-semibold text-slate-950">Available times</h4>
                   <div className="grid gap-4 sm:grid-cols-2">
                     {interview.availableSlots.map((slot) => {
-                      const date = new Date(slot)
+                      const key = `${interview.applicationId}:${slot.id}`
+                      const date = new Date(slot.startAt)
                       return (
                         <button
-                          key={slot}
+                          key={slot.id}
                           type="button"
-                          disabled={loadingMap[interview.id]}
-                          onClick={() => handleBook(interview.id, slot)}
+                          disabled={loadingMap[key]}
+                          onClick={() => handleBook(slot.id, interview.applicationId)}
                           className="rounded-[18px] border border-slate-200 p-5 text-left transition hover:border-slate-900"
                         >
                           <div className="font-semibold text-slate-950">{date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
@@ -1300,12 +1491,14 @@ function PortalInterviews() {
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Confirmed date</div>
                     <div className="mt-2 text-lg font-semibold text-slate-950">{new Date(interview.selectedSlot).toLocaleString()}</div>
-                    <a href="#" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-slate-950">
+                    <a href={interview.locationDetails || '#'} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-slate-950">
                       <LinkIcon size={16} />
                       Join video call
                     </a>
                   </div>
-                  <Button variant="secondary">Add to calendar</Button>
+                  <a href={buildInterviewCalendarUrl(interview, job?.title)} target="_blank" rel="noreferrer">
+                    <Button variant="secondary">Add to calendar</Button>
+                  </a>
                 </div>
               )}
             </div>
@@ -1318,43 +1511,76 @@ function PortalInterviews() {
 
 function PortalApply() {
   const { route, goBack, navigate } = useRouter()
-  const { user } = useAuth()
-  const { jobs, submitApplication } = useData()
+  const { user, profile } = useAuth()
+  const { jobs, submitApplication, skills, experienceRows } = useData()
   const job = jobs.find((item) => item.id === route.params?.jobId) || jobs[0]
   const [currentStep, setCurrentStep] = useState(0)
   const [experience, setExperience] = useState('')
-  const [cvAttached, setCvAttached] = useState(false)
+  const [cvFile, setCvFile] = useState(null)
   const [commissionConfirmed, setCommissionConfirmed] = useState(false)
   const [loading, setLoading] = useState(false)
+  const fileInputRef = useRef(null)
 
   const [form, setForm] = useState({
-    first_name: user.firstName,
-    last_name: user.lastName,
+    first_name: profile?.first_name || user?.user_metadata?.first_name || '',
+    last_name: profile?.last_name || user?.user_metadata?.last_name || '',
     email: user.email,
-    phone: user.phone,
-    location: 'United Kingdom',
-    linkedin_url: user.linkedIn,
-    portfolio_url: user.portfolio,
+    phone: profile?.phone || '',
+    location: profile?.location || 'United Kingdom',
+    linkedin_url: profile?.linkedin_url || '',
+    portfolio_url: profile?.portfolio_url || '',
     current_job_title: '',
     years_experience: '',
     cover_note: '',
   })
+
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      first_name: profile?.first_name || user?.user_metadata?.first_name || current.first_name,
+      last_name: profile?.last_name || user?.user_metadata?.last_name || current.last_name,
+      email: user?.email || current.email,
+      phone: profile?.phone || current.phone,
+      location: profile?.location || current.location,
+      linkedin_url: profile?.linkedin_url || current.linkedin_url,
+      portfolio_url: profile?.portfolio_url || current.portfolio_url,
+    }))
+  }, [profile, user?.email, user?.user_metadata?.first_name, user?.user_metadata?.last_name])
 
   const steps = ['Personal details', 'Experience', 'Questions & CV', 'Review']
 
   function canAdvance() {
     if (currentStep === 0) return form.first_name && form.last_name && form.email && form.phone
     if (currentStep === 1) return experience.trim()
-    if (currentStep === 2) return cvAttached && (!job.commissionOnly || commissionConfirmed)
+    if (currentStep === 2) return cvFile && (!job.commissionOnly || commissionConfirmed)
     return true
   }
 
   async function handleSubmit() {
+    if (!job || !user) return
     setLoading(true)
-    await new Promise((resolve) => setTimeout(resolve, 600))
-    const created = submitApplication(job.id, experience)
-    setLoading(false)
-    navigate('/portal/application', { id: created.id })
+    try {
+      const created = await submitApplication({
+        user,
+        job,
+        profile,
+        payload: {
+          ...form,
+          experience_summary: experience,
+          commission_acknowledged: commissionConfirmed,
+          privacy_acknowledged: true,
+          screening_answers: {},
+        },
+        cvFile,
+        skills,
+        experienceRows,
+      })
+      navigate('/portal/application', { id: created.id })
+    } catch (error) {
+      window.alert(error?.message || 'Could not submit your application.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -1437,13 +1663,20 @@ function PortalApply() {
 
         {currentStep === 2 ? (
           <div className="grid gap-5">
-            <div className={`flex items-center gap-4 rounded-[18px] border p-5 ${cvAttached ? 'border-emerald-300 bg-emerald-50/70' : 'border-dashed border-slate-300 bg-slate-50/80'}`}>
-              <Upload size={18} className={cvAttached ? 'text-emerald-600' : 'text-slate-400'} />
+            <div className={`flex items-center gap-4 rounded-[18px] border p-5 ${cvFile ? 'border-emerald-300 bg-emerald-50/70' : 'border-dashed border-slate-300 bg-slate-50/80'}`}>
+              <Upload size={18} className={cvFile ? 'text-emerald-600' : 'text-slate-400'} />
               <div className="flex-1">
-                <strong className="block text-sm text-slate-950">{cvAttached ? 'CV successfully attached' : 'Upload a file or drag and drop'}</strong>
-                <span className="mt-1 block text-sm text-slate-500">{cvAttached ? 'Click to replace file' : 'PDF, DOCX up to 10MB'}</span>
+                <strong className="block text-sm text-slate-950">{cvFile ? 'CV successfully attached' : 'Upload a file or drag and drop'}</strong>
+                <span className="mt-1 block text-sm text-slate-500">{cvFile ? cvFile.name : 'PDF, DOCX up to 10MB'}</span>
               </div>
-              <Button variant="secondary" onClick={() => setCvAttached(true)}>Select file</Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx"
+                className="hidden"
+                onChange={(event) => setCvFile(event.target.files?.[0] || null)}
+              />
+              <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>Select file</Button>
             </div>
 
             {job.commissionOnly ? (
@@ -1505,10 +1738,44 @@ function PortalApply() {
 }
 
 function PortalProfile() {
-  const [skills, setSkills] = useState([{ name: 'React', proficiency: 'Advanced', years: '6' }])
-  const [experienceRows, setExperienceRows] = useState([
-    { company: 'Example Studio', title: 'Senior Front-end Engineer', start: '2023-01-01', end: '', current: true, summary: 'Led front-end delivery across multiple client and platform products.' },
-  ])
+  const { profile } = useAuth()
+  const { skills, setSkills, experienceRows, setExperienceRows, saveProfile } = useData()
+  const [form, setForm] = useState(EMPTY_PROFILE)
+
+  useEffect(() => {
+    setForm({
+      ...EMPTY_PROFILE,
+      ...profile,
+    })
+  }, [profile])
+
+  const completion = Math.min(
+    100,
+    Math.round(
+      (
+        [
+          form.first_name,
+          form.last_name,
+          form.phone,
+          form.location,
+          form.linkedin_url || form.portfolio_url,
+          form.summary,
+          skills.filter((skill) => skill.name).length > 0,
+          experienceRows.filter((row) => row.company || row.title).length > 0,
+        ].filter(Boolean).length /
+          8
+      ) * 100,
+    ),
+  )
+
+  async function handleSaveProfile() {
+    try {
+      await saveProfile(form)
+      window.alert('Profile saved.')
+    } catch (error) {
+      window.alert(error?.message || 'Could not save your profile.')
+    }
+  }
 
   return (
     <div className="grid gap-6">
@@ -1522,7 +1789,7 @@ function PortalProfile() {
 
         <div className="rounded-[28px] border border-slate-200 bg-white/88 p-6 shadow-[0_10px_28px_rgba(15,23,42,0.05)]">
           <p className="text-xs font-semibold text-slate-500">Completion</p>
-          <span className="mt-3 block text-4xl font-semibold text-slate-950">78%</span>
+          <span className="mt-3 block text-4xl font-semibold text-slate-950">{completion}%</span>
           <p className="mt-3 text-sm leading-7 text-slate-600">Profile completeness across the key candidate fields that matter most.</p>
         </div>
       </section>
@@ -1535,24 +1802,28 @@ function PortalProfile() {
 
         <div className="grid gap-4 md:grid-cols-2">
           {[
-            ['First name', 'Jane'],
-            ['Last name', 'Doe'],
-            ['Phone', '+44 7700 900077'],
-            ['Date of birth', ''],
-            ['NI number', ''],
-            ['Location', 'United Kingdom'],
-            ['Address line 1', ''],
-            ['Address line 2', ''],
-            ['Town / city', ''],
-            ['Postcode', ''],
-            ['Country', 'United Kingdom'],
-            ['Right to work in UK', ''],
-            ['LinkedIn URL', 'linkedin.com/in/janedoe'],
-            ['Portfolio / website', 'janedoe.dev'],
-          ].map(([label, value]) => (
+            ['First name', 'first_name'],
+            ['Last name', 'last_name'],
+            ['Phone', 'phone'],
+            ['Date of birth', 'date_of_birth'],
+            ['NI number', 'ni_number'],
+            ['Location', 'location'],
+            ['Address line 1', 'address_line_1'],
+            ['Address line 2', 'address_line_2'],
+            ['Town / city', 'city'],
+            ['Postcode', 'postcode'],
+            ['Country', 'country'],
+            ['Right to work in UK', 'right_to_work_uk'],
+            ['LinkedIn URL', 'linkedin_url'],
+            ['Portfolio / website', 'portfolio_url'],
+          ].map(([label, key]) => (
             <div key={label} className="grid gap-2">
               <label className="text-sm font-semibold text-slate-900">{label}</label>
-              <input value={value} readOnly className="rounded-[14px] border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none" />
+              <input
+                value={form[key] || ''}
+                onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))}
+                className="rounded-[14px] border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none"
+              />
             </div>
           ))}
         </div>
@@ -1560,8 +1831,8 @@ function PortalProfile() {
         <div className="mt-5 grid gap-2">
           <label className="text-sm font-semibold text-slate-900">Professional summary</label>
           <textarea
-            readOnly
-            value="Senior front-end engineer focused on durable product systems, clean implementation, and scalable client delivery."
+            value={form.summary || ''}
+            onChange={(event) => setForm((current) => ({ ...current, summary: event.target.value }))}
             className="min-h-32 rounded-[14px] border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none"
           />
         </div>
@@ -1654,7 +1925,7 @@ function PortalProfile() {
 
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
         <span className="text-sm leading-7 text-slate-600">Your information stays tied to your candidate account and can be reused in future applications.</span>
-        <Button>Save profile</Button>
+        <Button onClick={handleSaveProfile}>Save profile</Button>
       </div>
     </div>
   )
@@ -1662,7 +1933,9 @@ function PortalProfile() {
 
 function AppRouter() {
   const { route } = useRouter()
-  const { user } = useAuth()
+  const { user, sessionLoading } = useAuth()
+
+  if (sessionLoading) return null
 
   if (route.path.startsWith('/portal') && !user) return <AuthPage mode="login" />
 
@@ -1683,73 +1956,248 @@ function AppRouter() {
   return <HomePage />
 }
 
+function parseRouteFromLocation() {
+  const search = new URLSearchParams(window.location.search)
+  const params = Object.fromEntries(search.entries())
+  return {
+    path: window.location.pathname || '/',
+    params,
+  }
+}
+
 export default function App() {
-  const [route, setRoute] = useState({ path: '/', params: {} })
-  const [history, setHistory] = useState([{ path: '/', params: {} }])
+  const [route, setRoute] = useState(() => parseRouteFromLocation())
   const [user, setUser] = useState(null)
-  const [jobs] = useState(jobsSeed)
-  const [applications, setApplications] = useState(initialApplications)
-  const [interviews, setInterviews] = useState(initialInterviews)
-  const [messages] = useState(initialMessages)
+  const [profile, setProfile] = useState({ ...EMPTY_PROFILE })
+  const [sessionLoading, setSessionLoading] = useState(true)
+  const [jobs, setJobs] = useState(jobsSeed)
+  const [applications, setApplications] = useState([])
+  const [interviews, setInterviews] = useState([])
+  const [messages, setMessages] = useState([])
+  const [skills, setSkills] = useState([])
+  const [experienceRows, setExperienceRows] = useState([])
 
   const navigate = (path, params = {}) => {
     const nextRoute = { path, params }
     setRoute(nextRoute)
-    setHistory((current) => [...current, nextRoute])
+    const search = new URLSearchParams(params)
+    const nextUrl = `${path}${search.toString() ? `?${search.toString()}` : ''}`
+    window.history.pushState(nextRoute, '', nextUrl)
     window.scrollTo(0, 0)
   }
 
   const goBack = () => {
-    setHistory((current) => {
-      if (current.length <= 1) {
-        setRoute({ path: '/', params: {} })
-        return current
-      }
-      const nextHistory = [...current]
-      nextHistory.pop()
-      setRoute(nextHistory[nextHistory.length - 1])
-      return nextHistory
-    })
-  }
-
-  const login = (email) => {
-    setUser({ ...initialUser, email })
-  }
-
-  const logout = () => {
-    setUser(null)
-    setRoute({ path: '/login', params: {} })
-    setHistory([{ path: '/login', params: {} }])
-  }
-
-  const submitApplication = (jobId, experienceNotes) => {
-    const newApplication = {
-      id: `app-${Date.now()}`,
-      candidateId: initialUser.id,
-      jobId,
-      status: 'SUBMITTED',
-      appliedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      experienceNotes,
+    if (window.history.length <= 1) {
+      navigate('/')
+      return
     }
-    setApplications((current) => [newApplication, ...current])
-    return newApplication
+    window.history.back()
   }
 
-  const bookInterview = (interviewId, slot) => {
-    setInterviews((current) => current.map((item) => item.id === interviewId ? {
-      ...item,
-      status: 'SCHEDULED',
-      selectedSlot: slot,
-      locationDetails: 'https://meet.google.com/dh-careers-demo',
-    } : item))
-    setApplications((current) => current.map((item) => item.id === 'app-101' ? { ...item, status: 'INTERVIEW_SCHEDULED', updatedAt: new Date().toISOString() } : item))
+  useEffect(() => {
+    const handlePopState = () => setRoute(parseRouteFromLocation())
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    async function bootstrapSession() {
+      if (!supabase || !isSupabaseConfigured) {
+        if (active) setSessionLoading(false)
+        return
+      }
+
+      const { data } = await supabase.auth.getSession()
+      if (!active) return
+      setUser(data.session?.user || null)
+      setSessionLoading(false)
+    }
+
+    bootstrapSession()
+
+    if (!supabase || !isSupabaseConfigured) return undefined
+
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+      setUser(nextSession?.user || null)
+      setSessionLoading(false)
+    })
+
+    return () => {
+      active = false
+      listener.subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    listPublishedJobs()
+      .then((data) => {
+        if (active && data.length) setJobs(data)
+      })
+      .catch(() => {
+        if (active) setJobs(jobsSeed)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  async function refreshWorkspace(currentUser = user) {
+    if (!currentUser?.id) {
+      setApplications([])
+      setInterviews([])
+      setMessages([])
+      setSkills([])
+      setExperienceRows([])
+      setProfile({ ...EMPTY_PROFILE })
+      return
+    }
+
+    const [nextProfile, nextSkills, nextExperience] = await Promise.all([
+      fetchCandidateProfile(currentUser),
+      listCandidateSkills(currentUser.id),
+      listCandidateExperience(currentUser.id),
+    ])
+
+    setProfile(nextProfile)
+    setSkills((nextSkills || []).map((item) => ({
+      name: item.name || '',
+      proficiency: item.proficiency || '',
+      years: item.years_experience || '',
+    })))
+    setExperienceRows((nextExperience || []).map((item) => ({
+      company: item.company_name || '',
+      title: item.job_title || '',
+      start: item.start_date || '',
+      end: item.end_date || '',
+      current: item.is_current === true,
+      summary: item.summary || '',
+    })))
+
+    const nextApplications = await listCandidateApplications({ userId: currentUser.id, email: currentUser.email })
+    setApplications(nextApplications.length ? nextApplications : [])
+
+    const [nextInterviews, nextMessages] = await Promise.all([
+      listCandidateInterviews(nextApplications, currentUser.id),
+      listCandidateMessages(nextApplications.map((item) => item.id)),
+    ])
+    setInterviews(nextInterviews)
+    setMessages(nextMessages)
+  }
+
+  useEffect(() => {
+    let active = true
+
+    async function bootstrapUserData() {
+      if (!user?.id) {
+        setProfile({ ...EMPTY_PROFILE })
+        setApplications([])
+        setInterviews([])
+        setMessages([])
+        setSkills([])
+        setExperienceRows([])
+        return
+      }
+
+      try {
+        await ensureCandidateProfile(user)
+        await claimExistingApplications().catch(() => {})
+        if (active) await refreshWorkspace(user)
+      } catch (error) {
+        console.error(error)
+      }
+    }
+
+    bootstrapUserData()
+    return () => {
+      active = false
+    }
+  }, [user?.id])
+
+  const login = async (email, password) => {
+    const nextUser = await signInCandidate({ email, password })
+    if (nextUser) {
+      setUser(nextUser)
+    }
+  }
+
+  const signup = async (email, password, redirectTo) => {
+    return signUpCandidate({ email, password, redirectTo })
+  }
+
+  const resetPassword = async (email) => {
+    await resetCandidatePassword(email)
+  }
+
+  const logout = async () => {
+    await signOutCandidate()
+    setUser(null)
+    setProfile({ ...EMPTY_PROFILE })
+    setApplications([])
+    setInterviews([])
+    setMessages([])
+    setSkills([])
+    setExperienceRows([])
+    navigate('/login')
+  }
+
+  const saveProfile = async (nextProfile) => {
+    if (!user?.id) throw new Error('Candidate session missing.')
+    const savedProfile = await saveCandidateProfile(user.id, nextProfile)
+    await Promise.all([
+      saveCandidateSkills(user.id, skills),
+      saveCandidateExperience(user.id, experienceRows),
+    ])
+    setProfile(savedProfile)
+    await syncCandidateProfileSnapshot(savedProfile, skills, experienceRows).catch(() => {})
+    await refreshWorkspace(user)
+    return savedProfile
+  }
+
+  const submitApplication = async ({ user: candidateUser, job, profile: currentProfile, payload, cvFile, skills: profileSkills, experienceRows: profileExperience }) => {
+    if (!candidateUser?.id) throw new Error('Candidate session missing.')
+    let cvUpload = null
+    if (cvFile) {
+      cvUpload = await uploadCandidateCv(cvFile, `${job.slug || job.id}-${candidateUser.id}`)
+    }
+    const created = await submitCandidateApplication({
+      user: candidateUser,
+      job,
+      profile: currentProfile,
+      payload,
+      cvUpload,
+      skills: profileSkills,
+      experience: profileExperience,
+    })
+    await refreshWorkspace(candidateUser)
+    return created
+  }
+
+  const bookInterview = async (slotId) => {
+    await bookInterviewSlot(slotId)
+    await refreshWorkspace(user)
   }
 
   return (
     <RouterContext.Provider value={{ route, navigate, goBack }}>
-      <AuthContext.Provider value={{ user, login, logout }}>
-        <DataContext.Provider value={{ jobs, applications, interviews, messages, submitApplication, bookInterview }}>
+      <AuthContext.Provider value={{ user, profile, sessionLoading, login, signup, resetPassword, logout }}>
+        <DataContext.Provider
+          value={{
+            jobs,
+            applications,
+            interviews,
+            messages,
+            skills,
+            setSkills,
+            experienceRows,
+            setExperienceRows,
+            submitApplication,
+            bookInterview,
+            saveProfile,
+          }}
+        >
           <AppRouter />
         </DataContext.Provider>
       </AuthContext.Provider>
